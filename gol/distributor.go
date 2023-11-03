@@ -2,6 +2,7 @@ package gol
 
 import (
 	"fmt"
+	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -67,6 +68,10 @@ func distributor(p Params, c distributorChannels) {
 				}
 			}
 		}
+		//report alive cells every 2 seconds
+		time.Sleep(2 * time.Second)
+		c.events <- AliveCellsCount{CellsCount: len(calculateAliveCells(p, world)), CompletedTurns: turn + 1}
+		c.events <- TurnComplete{CompletedTurns: turn + 1}
 	}
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
@@ -133,15 +138,6 @@ func calculateNextState(p Params, world [][]byte, start, end int) [][]byte {
 					}
 				}
 			}
-
-			// Apply the rules of the Game of Life
-			//if world[i][j] == 255 && (count > 3 || count < 2) {
-			//	newWorld[i-start][j] = 0
-			//} else if count == 3 && world[i][j] == 0 {
-			//	newWorld[i-start][j] = 255
-			//} else if world[i][j] == 255 && (count == 3 || count == 2) {
-			//	newWorld[i-start][j] = 255
-			//}
 			if world[i][j] == 255 {
 				if count > 3 || count < 2 {
 					newWorld[i-start][j] = 0
