@@ -2,7 +2,6 @@ package gol
 
 import (
 	"fmt"
-	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -69,9 +68,25 @@ func distributor(p Params, c distributorChannels) {
 			}
 		}
 		//report alive cells every 2 seconds
-		time.Sleep(2 * time.Second)
+		//comment out timer when testing!!
+		//time.Sleep(2 * time.Second)
 		c.events <- AliveCellsCount{CellsCount: len(calculateAliveCells(p, world)), CompletedTurns: turn + 1}
 		c.events <- TurnComplete{CompletedTurns: turn + 1}
+	}
+	//send the content of world and receive on the other side(writePgm) concurrently
+	c.ioCommand <- ioOutput
+	if p.Turns == 0 {
+		c.ioFilename <- fmt.Sprintf("%dx%dx0", p.ImageHeight, p.ImageWidth)
+	} else if p.Threads == 1 {
+		c.ioFilename <- fmt.Sprintf("%dx%dx%d", p.ImageHeight, p.ImageWidth, p.Turns)
+	} else {
+		c.ioFilename <- fmt.Sprintf("%dx%dx%d-%d", p.ImageHeight, p.ImageWidth, p.Turns, p.Threads)
+	}
+
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			c.ioOutput <- world[i][j]
+		}
 	}
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
