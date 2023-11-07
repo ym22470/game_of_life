@@ -39,13 +39,16 @@ func distributor(p Params, c distributorChannels) {
 	for i := 0; i < rows; i++ {
 		for j := 0; j < cols; j++ {
 			world[i][j] = <-c.ioInput
+			if world[i][j] == 255 {
+				c.events <- CellFlipped{CompletedTurns: 0, Cell: util.Cell{X: i, Y: j}}
+			}
 		}
 	}
 	turn := 0
 	// TODO: Execute all turns of the Game of Life.
 	for ; turn < p.Turns; turn++ {
 		if p.Threads == 1 {
-			world = calculateNextState(p, world, 0, p.ImageHeight)
+			world = calculateNextState(p, world, 0, p.ImageHeight, c, turn)
 		} else {
 			chans := make([]chan [][]byte, p.Threads)
 			for i := 0; i < p.Threads; i++ {
@@ -56,7 +59,8 @@ func distributor(p Params, c distributorChannels) {
 					b = p.ImageHeight
 				}
 				worldCopy := copySlice(world) //to handle data race condition by passing a copy of world to goroutines
-				go worker(p, worldCopy, a, b, chans[i])
+				go worker(p, worldCopy, a, b, chans[i], c, turn)
+
 			}
 			//combine all the strips produced by workers
 			for i := 0; i < p.Threads; i++ {
@@ -67,9 +71,6 @@ func distributor(p Params, c distributorChannels) {
 				}
 			}
 		}
-		//report alive cells every 2 seconds
-		//comment out timer when testing!!
-		//time.Sleep(2 * time.Second)
 		c.events <- AliveCellsCount{CellsCount: len(calculateAliveCells(p, world)), CompletedTurns: turn + 1}
 		c.events <- TurnComplete{CompletedTurns: turn + 1}
 	}
@@ -82,7 +83,7 @@ func distributor(p Params, c distributorChannels) {
 	} else {
 		c.ioFilename <- fmt.Sprintf("%dx%dx%d-%d", p.ImageHeight, p.ImageWidth, p.Turns, p.Threads)
 	}
-
+	//send the completed world to ioOutput c
 	for i := 0; i < rows; i++ {
 		for j := 0; j < cols; j++ {
 			c.ioOutput <- world[i][j]
@@ -90,10 +91,7 @@ func distributor(p Params, c distributorChannels) {
 	}
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
-	var turnState FinalTurnComplete // instantiate the new struct
-	turnState.CompletedTurns = turn
-	turnState.Alive = calculateAliveCells(p, world)
-	c.events <- turnState // sending event to testing framework via channel
+	c.events <- FinalTurnComplete{CompletedTurns: turn, Alive: calculateAliveCells(p, world)} // sending event to testing framework via channel
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
@@ -102,13 +100,13 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 }
 
-func worker(p Params, world [][]byte, startY, endY int, out chan<- [][]byte) {
-	results := calculateNextState(p, world, startY, endY)
+func worker(p Params, world [][]byte, startY, endY int, out chan<- [][]byte, c distributorChannels, turn int) {
+	results := calculateNextState(p, world, startY, endY, c, turn)
 	out <- results
-	close(out)
+	//close(out)
 }
 
-func calculateNextState(p Params, world [][]byte, start, end int) [][]byte {
+func calculateNextState(p Params, world [][]byte, start, end int, c distributorChannels, turn int) [][]byte {
 	//initialise variables
 	rows := len(world)
 	if rows == 0 {
@@ -164,6 +162,17 @@ func calculateNextState(p Params, world [][]byte, start, end int) [][]byte {
 					newWorld[i-start][j] = 255
 				} else {
 					newWorld[i-start][j] = 0
+				}
+			}
+		}
+	}
+	//send CellFlipped event every time there is change to the old world
+	for i := start; i < end; i++ {
+		for j := 0; j < cols; j++ {
+			if newWorld[i-start][j] != world[i][j] {
+				c.events <- CellFlipped{
+					CompletedTurns: turn + 1,
+					Cell:           util.Cell{X: i, Y: j}, // Assuming X is the column and Y is the row
 				}
 			}
 		}
